@@ -1,0 +1,15 @@
+# Core
+apache-airflow==2.9.3
+pandas==2.2.2
+numpy==1.26.4
+scikit-learn==1.5.1
+pyarrow==16.1.0
+
+# Database
+psycopg2-binary==2.9.9
+SQLAlchemy==2.0.31
+
+# API (futura)
+fastapi==0.111.0
+uvicorn==0.30.1
+pydantic==2.7.4
