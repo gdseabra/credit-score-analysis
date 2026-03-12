@@ -36,6 +36,18 @@ MANIFEST
 pip-log.txt
 pip-delete-this-directory.txt
 
+# Dados brutos, intermediários e processados — não versionar
+data/
+# Mas o código-fonte em src/data/ deve ser versionado
+!src/data/
+!src/data/**
+
+# Docker — volumes e logs gerados em runtime
+.docker/
+
+# Claude Code — configurações locais da ferramenta
+.claude/
+
 # Unit test / coverage reports
 htmlcov/
 .tox/

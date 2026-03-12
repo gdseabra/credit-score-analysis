@@ -154,19 +154,31 @@ def credit_score_etl():
     # -----------------------------------------------------------------------
     @task(task_id="load")
     def load(processed_path: str) -> None:
-        """Valida o artefato final e loga estatísticas de qualidade dos dados."""
+        """Persiste o dataset processado no Postgres e loga métricas de qualidade."""
+        from src.data.database import get_engine, CREDIT_SCHEMA
+
         df = pd.read_parquet(processed_path)
 
         null_pct = df.isnull().mean().mean() * 100
-        log.info("Load concluído: %d linhas | %d colunas | %.2f%% nulos", *df.shape, null_pct)
-
         if null_pct > 5:
             log.warning("Taxa de nulos acima de 5%% (%.2f%%). Verifique o pipeline.", null_pct)
 
-        # Ponto de extensão: aqui você pode inserir os dados em um banco de dados
-        # usando, por exemplo:
-        #   from src.data.database import get_engine
-        #   df.to_sql("credit_features", con=get_engine(), if_exists="replace", index=False)
+        engine = get_engine()
+        df.to_sql(
+            name="features",
+            con=engine,
+            schema=CREDIT_SCHEMA,
+            if_exists="replace",
+            index=False,
+            chunksize=10_000,
+        )
+
+        log.info(
+            "Load concluído: %d linhas | %d colunas | %.2f%% nulos → %s.features",
+            *df.shape,
+            null_pct,
+            CREDIT_SCHEMA,
+        )
 
     # -----------------------------------------------------------------------
     # Dependências
