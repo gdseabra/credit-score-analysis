@@ -184,6 +184,181 @@ class DomainFeatureBuilder(BaseEstimator, TransformerMixin):
 # Passo 4 — Pipeline de Pré-processamento Completo
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# Passo 3b — Features de Tabelas Auxiliares (Bureau + Cartão + Parcelas)
+# ---------------------------------------------------------------------------
+
+class AuxiliaryFeatureBuilder(BaseEstimator, TransformerMixin):
+    """Cria agregações das tabelas auxiliares do Home Credit e as junta ao dataset principal.
+
+    Recebe os DataFrames auxiliares no construtor e, durante o ``transform``,
+    calcula as agregações por ``SK_ID_CURR`` e realiza um LEFT JOIN no DataFrame
+    principal. Nulos resultantes de clientes sem histórico são imputados downstream
+    pelo pipeline de pré-processamento — esta classe não imputa.
+
+    Compatível com sklearn.pipeline.Pipeline.
+
+    Attributes:
+        bureau (pd.DataFrame | None): Dados do bureau de crédito externo.
+        credit_card (pd.DataFrame | None): Saldos mensais de cartão de crédito.
+        installments (pd.DataFrame | None): Histórico de pagamentos de parcelas.
+
+    Examples:
+        >>> builder = AuxiliaryFeatureBuilder(bureau=df_bureau,
+        ...                                   credit_card=df_cc,
+        ...                                   installments=df_inst)
+        >>> df_enriched = builder.fit_transform(df_application)
+    """
+
+    # Nomes das colunas de origem usadas nas agregações
+    _COL_SK_ID_CURR: str = "SK_ID_CURR"
+
+    # Bureau
+    _COL_BUREAU_ID: str = "SK_ID_BUREAU"
+    _COL_CREDIT_ACTIVE: str = "CREDIT_ACTIVE"
+    _COL_CREDIT_ACTIVE_VALUE: str = "Active"
+    _COL_AMT_CREDIT_SUM: str = "AMT_CREDIT_SUM"
+    _COL_DAYS_CREDIT: str = "DAYS_CREDIT"
+
+    # Credit card
+    _COL_AMT_BALANCE: str = "AMT_BALANCE"
+    _COL_AMT_CREDIT_LIMIT: str = "AMT_CREDIT_LIMIT_ACTUAL"
+    _COL_AMT_DRAWINGS: str = "AMT_DRAWINGS_CURRENT"
+
+    # Installments
+    _COL_AMT_PAYMENT: str = "AMT_PAYMENT"
+    _COL_AMT_INSTALMENT: str = "AMT_INSTALMENT"
+    _COL_DAYS_ENTRY_PAYMENT: str = "DAYS_ENTRY_PAYMENT"
+    _COL_DAYS_INSTALMENT: str = "DAYS_INSTALMENT"
+
+    def __init__(
+        self,
+        bureau: pd.DataFrame | None = None,
+        credit_card: pd.DataFrame | None = None,
+        installments: pd.DataFrame | None = None,
+    ) -> None:
+        self.bureau = bureau
+        self.credit_card = credit_card
+        self.installments = installments
+
+    def fit(self, X: pd.DataFrame, y=None) -> "AuxiliaryFeatureBuilder":
+        """Sem estado para aprender — retorna self para compatibilidade com Pipeline.
+
+        Args:
+            X: DataFrame de entrada.
+            y: Ignorado. Presente para compatibilidade com a API do Scikit-Learn.
+
+        Returns:
+            self
+        """
+        return self
+
+    def _agregar_bureau(self) -> pd.DataFrame:
+        """Calcula agregações da tabela bureau por cliente.
+
+        Returns:
+            DataFrame indexado por SK_ID_CURR com as colunas:
+            bureau_loan_count, bureau_active_loans,
+            bureau_total_credit_sum, bureau_mean_days_credit.
+        """
+        df = self.bureau.copy()
+        agg = df.groupby(self._COL_SK_ID_CURR).agg(
+            bureau_loan_count=(self._COL_BUREAU_ID, "count"),
+            bureau_active_loans=(
+                self._COL_CREDIT_ACTIVE,
+                lambda s: (s == self._COL_CREDIT_ACTIVE_VALUE).sum(),
+            ),
+            bureau_total_credit_sum=(self._COL_AMT_CREDIT_SUM, "sum"),
+            bureau_mean_days_credit=(self._COL_DAYS_CREDIT, "mean"),
+        ).reset_index()
+        return agg
+
+    def _agregar_credit_card(self) -> pd.DataFrame:
+        """Calcula agregações da tabela credit_card_balance por cliente.
+
+        Returns:
+            DataFrame indexado por SK_ID_CURR com as colunas:
+            cc_utilization_mean, cc_drawings_total, cc_months_with_balance.
+        """
+        df = self.credit_card.copy()
+
+        # Taxa de utilização — trata divisão por zero substituindo limite=0 por NaN
+        df["_utilization"] = df[self._COL_AMT_BALANCE] / df[
+            self._COL_AMT_CREDIT_LIMIT
+        ].replace(0, np.nan)
+
+        agg = df.groupby(self._COL_SK_ID_CURR).agg(
+            cc_utilization_mean=("_utilization", "mean"),
+            cc_drawings_total=(self._COL_AMT_DRAWINGS, "sum"),
+            cc_months_with_balance=(
+                self._COL_AMT_BALANCE,
+                lambda s: (s > 0).sum(),
+            ),
+        ).reset_index()
+        return agg
+
+    def _agregar_installments(self) -> pd.DataFrame:
+        """Calcula agregações da tabela installments_payments por cliente.
+
+        Returns:
+            DataFrame indexado por SK_ID_CURR com as colunas:
+            install_payment_ratio_mean, install_days_late_mean, install_late_count.
+        """
+        df = self.installments.copy()
+
+        # Razão pagamento/parcela — trata divisão por zero
+        df["_payment_ratio"] = df[self._COL_AMT_PAYMENT] / df[
+            self._COL_AMT_INSTALMENT
+        ].replace(0, np.nan)
+
+        # Dias de atraso (clamp em 0 para não contar pagamentos antecipados)
+        df["_days_late"] = (
+            df[self._COL_DAYS_ENTRY_PAYMENT] - df[self._COL_DAYS_INSTALMENT]
+        ).clip(lower=0)
+
+        agg = df.groupby(self._COL_SK_ID_CURR).agg(
+            install_payment_ratio_mean=("_payment_ratio", "mean"),
+            install_days_late_mean=("_days_late", "mean"),
+            install_late_count=("_days_late", lambda s: (s > 0).sum()),
+        ).reset_index()
+        return agg
+
+    def transform(self, X: pd.DataFrame, y=None) -> pd.DataFrame:
+        """Junta as agregações auxiliares ao DataFrame principal via LEFT JOIN.
+
+        Clientes sem histórico nas tabelas auxiliares receberão NaN nas colunas
+        correspondentes — a imputação é responsabilidade do pipeline downstream.
+
+        Args:
+            X: DataFrame principal contendo a coluna ``SK_ID_CURR``.
+            y: Ignorado. Presente para compatibilidade com a API do Scikit-Learn.
+
+        Returns:
+            Cópia do DataFrame enriquecida com as features auxiliares.
+
+        Raises:
+            KeyError: Se a coluna ``SK_ID_CURR`` não existir no DataFrame.
+        """
+        if self._COL_SK_ID_CURR not in X.columns:
+            raise KeyError(f"Coluna '{self._COL_SK_ID_CURR}' não encontrada no DataFrame.")
+
+        X_out = X.copy()
+
+        if self.bureau is not None:
+            agg_bureau = self._agregar_bureau()
+            X_out = X_out.merge(agg_bureau, on=self._COL_SK_ID_CURR, how="left")
+
+        if self.credit_card is not None:
+            agg_cc = self._agregar_credit_card()
+            X_out = X_out.merge(agg_cc, on=self._COL_SK_ID_CURR, how="left")
+
+        if self.installments is not None:
+            agg_inst = self._agregar_installments()
+            X_out = X_out.merge(agg_inst, on=self._COL_SK_ID_CURR, how="left")
+
+        return X_out
+
+
 def build_preprocessor_pipeline(
     numeric_cols: list[str],
     categorical_cols: list[str],

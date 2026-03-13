@@ -221,3 +221,6 @@ __marimo__/
 
 *.csv
 *.zip
+src/models/trainer.py
+.docker/airflow-logs/scheduler/latest
+data/interim/application_train_interim.parquet

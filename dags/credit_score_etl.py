@@ -181,11 +181,56 @@ def credit_score_etl():
         )
 
     # -----------------------------------------------------------------------
+    # TRAIN MODEL
+    # -----------------------------------------------------------------------
+    @task(task_id="train_model")
+    def train_model(processed_path: str) -> None:
+        """Treina modelo LightGBM com cross-validation e persiste via MLflow."""
+        from sklearn.base import clone
+
+        from src.features.build_features import build_preprocessor_pipeline
+        from src.models.classifiers import CreditClassifier
+        from src.models.trainer import CreditTrainer
+
+        df = pd.read_parquet(processed_path)
+
+        y = df["TARGET"]
+        X = df.drop(columns=["TARGET", "SK_ID_CURR"], errors="ignore")
+
+        # Separa colunas numéricas e categóricas disponíveis no arquivo processado
+        num_cols = [c for c in NUMERIC_COLS if c in X.columns]
+        cat_cols = [c for c in CATEGORICAL_COLS if c in X.columns]
+
+        pipeline = build_preprocessor_pipeline(num_cols, cat_cols)
+
+        trainer = CreditTrainer(modelo_nome="lightgbm")
+        metricas = trainer.train(X, y, pipeline, cv_folds=5)
+
+        log.info(
+            "train_model | AUC=%.4f±%.4f | Gini=%.4f | KS=%.4f | F1=%.4f",
+            metricas["auc_roc_mean"],
+            metricas["auc_roc_std"],
+            metricas["gini_mean"],
+            metricas["ks_stat_mean"],
+            metricas["f1_mean"],
+        )
+
+        # Ajusta pipeline completo (com modelo) nos dados completos antes de salvar
+        modelo = CreditClassifier.get_model("lightgbm")
+        pipeline_final = clone(pipeline)
+        pipeline_final.steps.append(("modelo", modelo))
+        pipeline_final.fit(X, y)
+
+        trainer.save_model(pipeline_final, metricas)
+        log.info("train_model concluído — modelo salvo com sucesso.")
+
+    # -----------------------------------------------------------------------
     # Dependências
     # -----------------------------------------------------------------------
     interim = extract()
     processed = transform(interim)
-    load(processed)
+    loaded = load(processed)
+    loaded >> train_model(processed)
 
 
 credit_score_etl()
