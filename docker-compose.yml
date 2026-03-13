@@ -17,6 +17,7 @@ x-airflow-common: &airflow-common
     - ./dags:/opt/airflow/dags
     - ./src:/opt/airflow/src
     - ./data:/opt/airflow/data
+    - ./models:/opt/airflow/models       # compartilhado com o serviço api
     - /data_lids/home/gabrielseabra/credit-score-analysis/.docker/airflow-logs:/opt/airflow/logs
     - /data_lids/home/gabrielseabra/credit-score-analysis/.docker/tmp:/tmp
   depends_on:
@@ -94,6 +95,30 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    networks:
+      - credit-net
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./models:/app/models         # pipeline treinado pelo Airflow
+      - ./src:/app/src               # hot-reload em desenvolvimento
+    environment:
+      PYTHONPATH: /app
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
     networks:
       - credit-net
 

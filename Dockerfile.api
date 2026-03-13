@@ -1,0 +1,51 @@
+# ============================================================
+# Dockerfile — Credit Score API (FastAPI + Uvicorn)
+# ============================================================
+# Imagem leve baseada em Python 3.11 slim.
+# Expõe a porta 8000 e serve via Uvicorn em modo de produção.
+#
+# Build:
+#   docker build -f Dockerfile.api -t credit-score-api .
+#
+# Run (standalone):
+#   docker run -p 8000:8000 \
+#     -v $(pwd)/models:/app/models \
+#     credit-score-api
+# ============================================================
+
+FROM python:3.11-slim
+
+# Evita prompts interativos durante o apt-get
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Dependências de sistema necessárias para LightGBM/scikit-learn
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libgomp1 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Diretório de trabalho dentro do container
+WORKDIR /app
+
+# Copia e instala apenas as dependências da API (layer separado para cache)
+COPY requirements.api.txt ./
+RUN pip install --no-cache-dir -r requirements.api.txt
+
+# Copia o código-fonte
+COPY src/ ./src/
+
+# Cria diretório de modelos (o volume externo será montado aqui)
+RUN mkdir -p /app/models
+
+# Usuário não-root para segurança
+RUN useradd --create-home appuser && chown -R appuser /app
+USER appuser
+
+# Porta exposta pela API
+EXPOSE 8000
+
+# Healthcheck interno do Docker
+HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"
+
+# Comando de inicialização em modo produção (sem --reload)
+CMD ["uvicorn", "src.api.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2"]
