@@ -5,7 +5,6 @@ Usamos dados sintéticos mínimos — sem dependência dos CSVs reais —
 para que os testes rodem em qualquer ambiente (CI/CD, máquina nova, etc.).
 """
 
-import numpy as np
 import pandas as pd
 import pytest
 
