@@ -11,7 +11,6 @@ import pytest
 from sklearn.pipeline import Pipeline
 
 from src.features.build_features import (
-    ANOMALY_DAYS_EMPLOYED,
     DAYS_IN_YEAR,
     AnomalyHandler,
     DomainFeatureBuilder,

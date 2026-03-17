@@ -37,24 +37,7 @@ def render_explanation_panel(result: ExplanationResult) -> None:
     # Ordena por impacto absoluto para exibição
     features_sorted = sorted(features, key=lambda f: abs(f.shap_value))
 
-    labels = [f.label for f in features_sorted]
-    values = [f.shap_value for f in features_sorted]
-    colors = [_IMPACT_COLOR_POS if v > 0 else _IMPACT_COLOR_NEG for v in values]
-
-    # Gráfico de barras horizontal usando dados nativos do Streamlit
-    import pandas as pd
-
-    chart_data = pd.DataFrame(
-        {
-            "Feature": labels,
-            "Impacto SHAP": values,
-            "Cor": colors,
-            "Direção": ["↑ Aumenta risco" if v > 0 else "↓ Reduz risco" for v in values],
-        }
-    )
-
-    # Exibe como barras horizontais via st.bar_chart não suporta horizontal,
-    # então usamos uma tabela visual + indicadores de progresso
+    # st.bar_chart não suporta horizontal; usa tabela visual + indicadores de progresso
     for feat in reversed(features_sorted):
         col1, col2, col3 = st.columns([3, 2, 5])
         direction = "🔴" if feat.shap_value > 0 else "🟢"

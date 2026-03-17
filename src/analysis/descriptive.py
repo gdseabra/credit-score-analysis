@@ -5,7 +5,6 @@ Funções reutilizáveis que encapsulam as análises feitas no notebook 01,
 permitindo reprodução programática sem dependência do Jupyter.
 """
 
-import numpy as np
 import pandas as pd
 
 TARGET_COL = "TARGET"

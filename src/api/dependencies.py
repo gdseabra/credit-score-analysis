@@ -11,7 +11,6 @@ salvo pelo Airflow DAG ``credit_score_etl`` via joblib.
 
 import logging
 from pathlib import Path
-from typing import Optional
 
 from fastapi import HTTPException, status
 

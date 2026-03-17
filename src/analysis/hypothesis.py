@@ -10,7 +10,6 @@ Convenção: H0 (hipótese nula) = não há diferença entre os grupos.
 
 from dataclasses import dataclass
 
-import numpy as np
 import pandas as pd
 from scipy import stats
 

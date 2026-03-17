@@ -35,21 +35,21 @@ class ShapFeatureResult:
 
 
 @dataclass
-class ExplanationResult(PredictionResult if False else object):
+class PredictionResult:
+    probability_default: float
+    decision: str
+    score_band: str
+    threshold: float
+
+
+@dataclass
+class ExplanationResult:
     probability_default: float
     decision: str
     score_band: str
     threshold: float
     shap_features: list[ShapFeatureResult]
     explanation: str
-
-
-@dataclass
-class PredictionResult:
-    probability_default: float
-    decision: str
-    score_band: str
-    threshold: float
 
 
 # ---------------------------------------------------------------------------
