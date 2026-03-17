@@ -33,8 +33,9 @@ RUN pip install --no-cache-dir -r requirements.api.txt
 # Copia o código-fonte
 COPY src/ ./src/
 
-# Cria diretório de modelos (o volume externo será montado aqui)
-RUN mkdir -p /app/models
+# Copia o modelo treinado para dentro da imagem (produção)
+# Em desenvolvimento, o volume ./models:/app/models sobrescreve este layer.
+COPY models/ ./models/
 
 # Usuário não-root para segurança
 RUN useradd --create-home appuser && chown -R appuser /app

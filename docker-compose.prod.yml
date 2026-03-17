@@ -1,0 +1,47 @@
+# ============================================================
+# docker-compose.prod.yml — Stack de produção (portfólio)
+#
+# Diferenças do docker-compose.yml (dev):
+#   - Sem Airflow, MLflow nem PostgreSQL (só necessários no treino)
+#   - Sem volume de hot-reload (código embutido na imagem)
+#   - Modelo embutido na imagem da API (sem volume externo)
+#   - Variáveis sensíveis via .env ou variáveis da plataforma
+#
+# Deploy local:
+#   docker compose -f docker-compose.prod.yml up --build
+#
+# Deploy Railway:
+#   Aponta para este arquivo nas configurações do projeto.
+# ============================================================
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    ports:
+      - "8000:8000"
+    environment:
+      PYTHONPATH: /app
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+    restart: unless-stopped
+    networks:
+      - credit-net
+
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    ports:
+      - "8501:8501"
+    environment:
+      API_URL: ${API_URL:-http://api:8000}
+    depends_on:
+      - api
+    restart: unless-stopped
+    networks:
+      - credit-net
+
+networks:
+  credit-net:
+    driver: bridge

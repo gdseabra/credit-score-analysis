@@ -148,6 +148,27 @@ class PredictionResponse(BaseModel):
     threshold: float = Field(..., description="Limiar de probabilidade utilizado na decisão")
 
 
+class ShapFeatureSchema(BaseModel):
+    """Contribuição de uma feature para a predição (SHAP value)."""
+
+    name: str = Field(..., description="Nome técnico da feature")
+    label: str = Field(..., description="Rótulo amigável da feature")
+    shap_value: float = Field(..., description="Valor SHAP (positivo = aumenta risco, negativo = reduz)")
+    feature_value: Optional[float | str] = Field(None, description="Valor da feature para este cliente")
+    description: str = Field(..., description="Descrição de negócio da feature")
+
+
+class ExplanationResponse(PredictionResponse):
+    """Resultado da predição enriquecido com SHAP values e explicação textual."""
+
+    shap_features: list[ShapFeatureSchema] = Field(
+        ..., description="Top features por impacto SHAP, ordenadas por valor absoluto"
+    )
+    explanation: str = Field(
+        ..., description="Explicação em linguagem natural gerada pelo LLM"
+    )
+
+
 class BatchInput(BaseModel):
     """Lista de solicitações para predição em lote."""
 

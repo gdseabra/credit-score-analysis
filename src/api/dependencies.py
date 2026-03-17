@@ -59,7 +59,8 @@ CATEGORICAL_COLS: list[str] = [
 # Estado global da aplicação
 # ---------------------------------------------------------------------------
 
-_model = None  # Pipeline sklearn carregado no startup
+_model = None        # Pipeline sklearn carregado no startup
+_shap_explainer = None  # SHAPExplainer inicializado após o modelo
 
 
 def load_model() -> None:
@@ -79,6 +80,16 @@ def load_model() -> None:
         except Exception as exc:
             logger.error("Falha ao carregar o modelo '%s': %s", MODEL_PATH, exc)
             _model = None
+            return
+
+        # Inicializa SHAPExplainer logo após carregar o modelo
+        global _shap_explainer
+        try:
+            from src.explainability.shap_explainer import SHAPExplainer
+            _shap_explainer = SHAPExplainer(_model, top_n=6)
+        except Exception as exc:
+            logger.warning("SHAPExplainer não pôde ser inicializado: %s", exc)
+            _shap_explainer = None
     else:
         logger.warning(
             "Arquivo de modelo não encontrado em '%s'. "
@@ -106,6 +117,27 @@ def get_model():
             ),
         )
     return _model
+
+
+def get_shap_explainer():
+    """Dependency FastAPI que injeta o SHAPExplainer nos endpoints.
+
+    Returns:
+        SHAPExplainer inicializado.
+
+    Raises:
+        HTTPException 503: Se o explainer não estiver disponível.
+    """
+    if _shap_explainer is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=(
+                "SHAPExplainer não disponível. "
+                "Verifique se o modelo foi carregado corretamente e se "
+                "a biblioteca shap está instalada."
+            ),
+        )
+    return _shap_explainer
 
 
 def is_model_loaded() -> bool:

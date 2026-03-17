@@ -105,40 +105,28 @@ def credit_score_etl():
     # -----------------------------------------------------------------------
     @task(task_id="transform")
     def transform(interim_path: str) -> str:
-        """Aplica o pipeline de feature engineering e salva em Parquet."""
-        from src.features.build_features import (
-            AnomalyHandler,
-            DomainFeatureBuilder,
-            build_preprocessor_pipeline,
-        )
+        """Aplica feature engineering (anomalias + features de domínio) e salva em Parquet.
+
+        Responsabilidade desta etapa: apenas transformações de negócio
+        (AnomalyHandler + DomainFeatureBuilder). Imputer, scaler e encoder
+        são responsabilidade do sklearn Pipeline no train_model, onde são
+        fitados nos dados de treino sem risco de data leakage.
+        """
+        from src.features.build_features import AnomalyHandler, DomainFeatureBuilder
 
         PROCESSED_DIR.mkdir(parents=True, exist_ok=True)
 
         df = pd.read_parquet(interim_path)
-        target = df["TARGET"].copy() if "TARGET" in df.columns else None
 
-        # Aplica apenas AnomalyHandler + DomainFeatureBuilder para manter o
-        # DataFrame com nomes de colunas legíveis antes do ColumnTransformer.
         df = AnomalyHandler().fit_transform(df)
         df = DomainFeatureBuilder().fit_transform(df)
 
-        # Filtra apenas colunas disponíveis no dataset para evitar KeyError
-        num_cols = [c for c in NUMERIC_COLS if c in df.columns]
-        cat_cols = [c for c in CATEGORICAL_COLS if c in df.columns]
-
-        pipeline = build_preprocessor_pipeline(num_cols, cat_cols)
-        X = df.drop(columns=["TARGET", "SK_ID_CURR"], errors="ignore")
-        X_transformed = pipeline.fit_transform(X)
-
-        # Reconstrói DataFrame com nomes das colunas geradas pelo pipeline
-        cat_encoder = pipeline.named_steps["preprocessor"].named_transformers_["cat"]
-        cat_feature_names = cat_encoder.named_steps["encoder"].get_feature_names_out(cat_cols)
-        feature_names = num_cols + list(cat_feature_names)
-
-        df_processed = pd.DataFrame(X_transformed, columns=feature_names)
-
-        if target is not None:
-            df_processed["TARGET"] = target.values
+        # Mantém apenas as colunas que o modelo usará + TARGET e SK_ID_CURR
+        cols_to_keep = (
+            [c for c in NUMERIC_COLS + CATEGORICAL_COLS if c in df.columns]
+            + [c for c in ["TARGET", "SK_ID_CURR"] if c in df.columns]
+        )
+        df_processed = df[cols_to_keep].copy()
 
         df_processed.to_parquet(PROCESSED_FILE, index=False)
         log.info(

@@ -32,7 +32,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from src.api.dependencies import is_model_loaded, load_model
-from src.api.routes import auth, model, predict
+from src.api.routes import auth, model, predict, explain
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -118,6 +118,7 @@ app.add_middleware(
 
 app.include_router(auth.router)
 app.include_router(predict.router)
+app.include_router(explain.router)
 app.include_router(model.router)
 
 
