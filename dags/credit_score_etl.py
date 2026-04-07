@@ -38,15 +38,18 @@ PROCESSED_FILE = PROCESSED_DIR / "application_train_processed.parquet"
 
 # Colunas selecionadas para o modelo (baseado na EDA — notebook 01)
 NUMERIC_COLS = [
+    # --- Contrato atual ---
     "AMT_CREDIT",
     "AMT_ANNUITY",
     "AMT_INCOME_TOTAL",
     "AMT_GOODS_PRICE",
+    # --- Demográficas (tempo) ---
     "DAYS_BIRTH",
     "DAYS_EMPLOYED",
     "DAYS_REGISTRATION",
     "DAYS_ID_PUBLISH",
     "CNT_FAM_MEMBERS",
+    # --- Features derivadas (DomainFeatureBuilder) ---
     "CREDIT_INCOME_RATIO",
     "ANNUITY_INCOME_RATIO",
     "CREDIT_TERM_MONTHS",
@@ -54,6 +57,36 @@ NUMERIC_COLS = [
     "AGE_YEARS",
     "EMPLOYED_YEARS",
     "EMPLOYED_TO_AGE_RATIO",
+    # --- Scores externos de bureau (alta preditividade, sem leakage) ---
+    "EXT_SOURCE_1",
+    "EXT_SOURCE_2",
+    "EXT_SOURCE_3",
+    # --- Consultas recentes ao bureau (comportamento de busca por crédito) ---
+    "AMT_REQ_CREDIT_BUREAU_YEAR",
+    # --- Agregações bureau (AuxiliaryFeatureBuilder) ---
+    "bureau_loan_count",
+    "bureau_active_loans",
+    "bureau_total_credit_sum",
+    "bureau_mean_days_credit",
+    # --- Histórico de atraso no bureau externo (bureau_balance) ---
+    "bureau_bal_max_dpd",
+    "bureau_bal_dpd_months_total",
+    # --- Solicitações anteriores no Home Credit ---
+    "prev_app_count",
+    "prev_app_approval_rate",
+    "prev_app_credit_ratio_mean",
+    "prev_app_days_last_decision",
+    # --- Comportamento POS/empréstimo pessoal anterior ---
+    "pos_dpd_mean",
+    "pos_dpd_months_total",
+    # --- Cartão de crédito anterior ---
+    "cc_utilization_mean",
+    "cc_drawings_total",
+    "cc_months_with_balance",
+    # --- Pagamento de parcelas anteriores ---
+    "install_payment_ratio_mean",
+    "install_days_late_mean",
+    "install_late_count",
 ]
 
 CATEGORICAL_COLS = [
@@ -105,14 +138,24 @@ def credit_score_etl():
     # -----------------------------------------------------------------------
     @task(task_id="transform")
     def transform(interim_path: str) -> str:
-        """Aplica feature engineering (anomalias + features de domínio) e salva em Parquet.
+        """Aplica feature engineering completo e salva em Parquet.
 
-        Responsabilidade desta etapa: apenas transformações de negócio
-        (AnomalyHandler + DomainFeatureBuilder). Imputer, scaler e encoder
-        são responsabilidade do sklearn Pipeline no train_model, onde são
-        fitados nos dados de treino sem risco de data leakage.
+        Etapas:
+        1. AnomalyHandler         — trata sentinela DAYS_EMPLOYED.
+        2. DomainFeatureBuilder   — cria ratios e features derivadas.
+        3. AuxiliaryFeatureBuilder — agrega bureau, bureau_balance,
+                                     previous_application, POS_CASH_balance,
+                                     credit_card_balance e installments_payments.
+
+        Imputer, scaler e encoder permanecem no sklearn Pipeline do train_model
+        para evitar data leakage entre folds de cross-validation.
         """
-        from src.features.build_features import AnomalyHandler, DomainFeatureBuilder
+        from src.data.loader import HomeCreditDataLoader
+        from src.features.build_features import (
+            AnomalyHandler,
+            AuxiliaryFeatureBuilder,
+            DomainFeatureBuilder,
+        )
 
         PROCESSED_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -120,6 +163,17 @@ def credit_score_etl():
 
         df = AnomalyHandler().fit_transform(df)
         df = DomainFeatureBuilder().fit_transform(df)
+
+        loader = HomeCreditDataLoader(data_dir=str(RAW_DIR))
+        aux = AuxiliaryFeatureBuilder(
+            bureau=loader.load_bureau(),
+            bureau_balance=loader.load_bureau_balance(),
+            previous_app=loader.load_previous_applications(),
+            pos_cash=loader.load_pos_cash_balance(),
+            credit_card=loader.load_credit_card_balance(),
+            installments=loader.load_installments_payments(),
+        )
+        df = aux.fit_transform(df)
 
         # Mantém apenas as colunas que o modelo usará + TARGET e SK_ID_CURR
         cols_to_keep = (

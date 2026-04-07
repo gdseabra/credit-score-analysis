@@ -82,17 +82,37 @@ class HomeCreditDataLoader:
         """Carrega o histórico de aplicações anteriores no próprio Home Credit."""
         return self._load_csv("previous_application.csv")
 
+    def load_bureau_balance(self) -> pd.DataFrame:
+        """Carrega o histórico mensal de cada crédito externo (bureau_balance)."""
+        return self._load_csv("bureau_balance.csv")
+
+    def load_installments_payments(self) -> pd.DataFrame:
+        """Carrega o histórico de pagamentos de parcelas de contratos anteriores."""
+        return self._load_csv("installments_payments.csv")
+
+    def load_pos_cash_balance(self) -> pd.DataFrame:
+        """Carrega o saldo mensal de contratos POS/empréstimo pessoal anteriores."""
+        return self._load_csv("POS_CASH_balance.csv")
+
+    def load_credit_card_balance(self) -> pd.DataFrame:
+        """Carrega o extrato mensal de cartões de crédito anteriores."""
+        return self._load_csv("credit_card_balance.csv")
+
     def load_all_core_tables(self) -> Dict[str, pd.DataFrame]:
         """
         Carrega as principais tabelas de uma só vez para análise ou feature engineering.
-        
+
         Returns:
             Dict[str, pd.DataFrame]: Dicionário contendo os DataFrames.
         """
         self.logger.info("Iniciando carregamento em lote das tabelas principais...")
-        
+
         return {
             "application_train": self.load_application_train(),
             "bureau": self.load_bureau(),
-            "previous_application": self.load_previous_applications()
+            "bureau_balance": self.load_bureau_balance(),
+            "previous_application": self.load_previous_applications(),
+            "installments_payments": self.load_installments_payments(),
+            "pos_cash_balance": self.load_pos_cash_balance(),
+            "credit_card_balance": self.load_credit_card_balance(),
         }

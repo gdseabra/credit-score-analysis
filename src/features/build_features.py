@@ -220,6 +220,9 @@ class AuxiliaryFeatureBuilder(BaseEstimator, TransformerMixin):
     _COL_AMT_CREDIT_SUM: str = "AMT_CREDIT_SUM"
     _COL_DAYS_CREDIT: str = "DAYS_CREDIT"
 
+    # Bureau balance — STATUS: C/X → 0 (sem atraso), 1-5 → bucket de atraso
+    _BUREAU_STATUS_MAP: dict = {"C": 0, "X": 0, "0": 0, "1": 1, "2": 2, "3": 3, "4": 4, "5": 5}
+
     # Credit card
     _COL_AMT_BALANCE: str = "AMT_BALANCE"
     _COL_AMT_CREDIT_LIMIT: str = "AMT_CREDIT_LIMIT_ACTUAL"
@@ -231,15 +234,31 @@ class AuxiliaryFeatureBuilder(BaseEstimator, TransformerMixin):
     _COL_DAYS_ENTRY_PAYMENT: str = "DAYS_ENTRY_PAYMENT"
     _COL_DAYS_INSTALMENT: str = "DAYS_INSTALMENT"
 
+    # Previous application
+    _COL_SK_ID_PREV: str = "SK_ID_PREV"
+    _COL_CONTRACT_STATUS: str = "NAME_CONTRACT_STATUS"
+    _COL_AMT_APPLICATION: str = "AMT_APPLICATION"
+    _COL_AMT_CREDIT_PREV: str = "AMT_CREDIT"
+    _COL_DAYS_DECISION: str = "DAYS_DECISION"
+
+    # POS CASH balance
+    _COL_SK_DPD: str = "SK_DPD"
+
     def __init__(
         self,
         bureau: pd.DataFrame | None = None,
+        bureau_balance: pd.DataFrame | None = None,
         credit_card: pd.DataFrame | None = None,
         installments: pd.DataFrame | None = None,
+        previous_app: pd.DataFrame | None = None,
+        pos_cash: pd.DataFrame | None = None,
     ) -> None:
         self.bureau = bureau
+        self.bureau_balance = bureau_balance
         self.credit_card = credit_card
         self.installments = installments
+        self.previous_app = previous_app
+        self.pos_cash = pos_cash
 
     def fit(self, X: pd.DataFrame, y=None) -> "AuxiliaryFeatureBuilder":
         """Sem estado para aprender — retorna self para compatibilidade com Pipeline.
@@ -297,6 +316,76 @@ class AuxiliaryFeatureBuilder(BaseEstimator, TransformerMixin):
         ).reset_index()
         return agg
 
+    def _agregar_bureau_balance(self) -> pd.DataFrame:
+        """Agrega o histórico mensal de créditos externos por cliente.
+
+        O STATUS é mapeado para ordinal (C/X → 0, 1-5 → bucket de atraso).
+        A agregação é feita em dois passos: por SK_ID_BUREAU → depois por SK_ID_CURR
+        via join com bureau.
+
+        Returns:
+            DataFrame indexado por SK_ID_CURR com as colunas:
+            bureau_bal_max_dpd, bureau_bal_dpd_months_total.
+        """
+        df = self.bureau_balance.copy()
+        df["_status_num"] = df["STATUS"].map(self._BUREAU_STATUS_MAP).fillna(0)
+
+        # Agrega por crédito individual
+        agg_by_bureau = df.groupby(self._COL_BUREAU_ID).agg(
+            _max_dpd=("_status_num", "max"),
+            _dpd_months=("_status_num", lambda s: (s > 0).sum()),
+        ).reset_index()
+
+        # Une com bureau para obter SK_ID_CURR
+        bureau_ids = self.bureau[[self._COL_BUREAU_ID, self._COL_SK_ID_CURR]].copy()
+        merged = bureau_ids.merge(agg_by_bureau, on=self._COL_BUREAU_ID, how="left")
+
+        # Agrega por cliente
+        agg = merged.groupby(self._COL_SK_ID_CURR).agg(
+            bureau_bal_max_dpd=("_max_dpd", "max"),
+            bureau_bal_dpd_months_total=("_dpd_months", "sum"),
+        ).reset_index()
+        return agg
+
+    def _agregar_previous_app(self) -> pd.DataFrame:
+        """Agrega o histórico de solicitações anteriores no próprio Home Credit por cliente.
+
+        Returns:
+            DataFrame indexado por SK_ID_CURR com as colunas:
+            prev_app_count, prev_app_approval_rate, prev_app_credit_ratio_mean,
+            prev_app_days_last_decision.
+        """
+        df = self.previous_app.copy()
+        df["_approved"] = (df[self._COL_CONTRACT_STATUS] == "Approved").astype(np.int8)
+        df["_credit_ratio"] = df[self._COL_AMT_CREDIT_PREV] / df[self._COL_AMT_APPLICATION].replace(0, np.nan)
+
+        agg = df.groupby(self._COL_SK_ID_CURR).agg(
+            prev_app_count=(self._COL_SK_ID_PREV, "count"),
+            prev_app_approved=("_approved", "sum"),
+            prev_app_credit_ratio_mean=("_credit_ratio", "mean"),
+            # DAYS_DECISION é negativo; o maior valor (menos negativo) é o mais recente
+            prev_app_days_last_decision=(self._COL_DAYS_DECISION, "max"),
+        ).reset_index()
+
+        agg["prev_app_approval_rate"] = agg["prev_app_approved"] / agg["prev_app_count"]
+        agg = agg.drop(columns=["prev_app_approved"])
+        return agg
+
+    def _agregar_pos_cash(self) -> pd.DataFrame:
+        """Agrega o saldo mensal de contratos POS/empréstimo pessoal anteriores por cliente.
+
+        Returns:
+            DataFrame indexado por SK_ID_CURR com as colunas:
+            pos_dpd_mean, pos_dpd_months_total.
+        """
+        df = self.pos_cash.copy()
+
+        agg = df.groupby(self._COL_SK_ID_CURR).agg(
+            pos_dpd_mean=(self._COL_SK_DPD, "mean"),
+            pos_dpd_months_total=(self._COL_SK_DPD, lambda s: (s > 0).sum()),
+        ).reset_index()
+        return agg
+
     def _agregar_installments(self) -> pd.DataFrame:
         """Calcula agregações da tabela installments_payments por cliente.
 
@@ -347,6 +436,18 @@ class AuxiliaryFeatureBuilder(BaseEstimator, TransformerMixin):
         if self.bureau is not None:
             agg_bureau = self._agregar_bureau()
             X_out = X_out.merge(agg_bureau, on=self._COL_SK_ID_CURR, how="left")
+
+        if self.bureau_balance is not None and self.bureau is not None:
+            agg_bureau_bal = self._agregar_bureau_balance()
+            X_out = X_out.merge(agg_bureau_bal, on=self._COL_SK_ID_CURR, how="left")
+
+        if self.previous_app is not None:
+            agg_prev = self._agregar_previous_app()
+            X_out = X_out.merge(agg_prev, on=self._COL_SK_ID_CURR, how="left")
+
+        if self.pos_cash is not None:
+            agg_pos = self._agregar_pos_cash()
+            X_out = X_out.merge(agg_pos, on=self._COL_SK_ID_CURR, how="left")
 
         if self.credit_card is not None:
             agg_cc = self._agregar_credit_card()
