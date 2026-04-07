@@ -15,7 +15,7 @@ import pandas as pd
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from src.api.auth import get_current_user
-from src.api.dependencies import get_model
+from src.api.dependencies import get_model, get_model_by_stage
 from src.api.schemas import (
     ApplicationInput,
     BatchInput,
@@ -23,6 +23,7 @@ from src.api.schemas import (
     Decision,
     PredictionResponse,
     ScoreBand,
+    ShadowPredictionResponse,
 )
 
 logger = logging.getLogger(__name__)
@@ -141,6 +142,73 @@ def predict(
     """
     logger.info("Predição individual | user=%s", _user["username"])
     return _run_prediction(application, model)
+
+
+@router.post(
+    "/shadow",
+    response_model=ShadowPredictionResponse,
+    summary="Shadow mode — compara Production vs Staging",
+    description=(
+        "Executa a predição nos modelos **Production** e **Staging** simultaneamente.\n\n"
+        "- O cliente recebe ambos os resultados para comparação.\n"
+        "- Útil para validar um modelo novo antes de promovê-lo a Production.\n"
+        "- Loga a diferença entre as predições para análise.\n\n"
+        "Requer que ambos os modelos estejam carregados. "
+        "Retorna 503 se o modelo Staging não estiver disponível.\n\n"
+        "Requer token JWT no header `Authorization: Bearer <token>`."
+    ),
+)
+def predict_shadow(
+    application: ApplicationInput,
+    _user: dict = Depends(get_current_user),
+) -> ShadowPredictionResponse:
+    """Executa predição em ambos os modelos e compara os resultados."""
+    prod_model = get_model_by_stage("production")
+    staging_model = get_model_by_stage("staging")
+
+    if prod_model is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Modelo Production não disponível.",
+        )
+    if staging_model is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Modelo Staging não disponível. Registre um modelo como Staging no MLflow.",
+        )
+
+    prod_result = _run_prediction(application, prod_model)
+    staging_result = _run_prediction(application, staging_model)
+
+    prob_diff = round(staging_result.probability_default - prod_result.probability_default, 4)
+    decision_match = prod_result.decision == staging_result.decision
+
+    if not decision_match:
+        logger.warning(
+            "Shadow DIVERGÊNCIA | user=%s | prod=%s (%.4f) | staging=%s (%.4f) | diff=%.4f",
+            _user["username"],
+            prod_result.decision.value,
+            prod_result.probability_default,
+            staging_result.decision.value,
+            staging_result.probability_default,
+            prob_diff,
+        )
+    else:
+        logger.info(
+            "Shadow OK | user=%s | decisão=%s | prod=%.4f | staging=%.4f | diff=%.4f",
+            _user["username"],
+            prod_result.decision.value,
+            prod_result.probability_default,
+            staging_result.probability_default,
+            prob_diff,
+        )
+
+    return ShadowPredictionResponse(
+        production=prod_result,
+        staging=staging_result,
+        probability_diff=prob_diff,
+        decision_match=decision_match,
+    )
 
 
 @router.post(

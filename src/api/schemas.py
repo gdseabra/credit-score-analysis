@@ -169,6 +169,19 @@ class ExplanationResponse(PredictionResponse):
     )
 
 
+class ShadowPredictionResponse(BaseModel):
+    """Resultado do shadow mode: compara Production vs Staging."""
+
+    production: PredictionResponse = Field(..., description="Predição do modelo em Production")
+    staging: PredictionResponse = Field(..., description="Predição do modelo em Staging")
+    probability_diff: float = Field(
+        ..., description="Diferença absoluta entre probabilidades (staging - production)"
+    )
+    decision_match: bool = Field(
+        ..., description="True se ambos os modelos concordam na decisão"
+    )
+
+
 class BatchInput(BaseModel):
     """Lista de solicitações para predição em lote."""
 
