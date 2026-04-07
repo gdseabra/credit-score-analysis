@@ -31,7 +31,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from src.api.dependencies import is_model_loaded, load_model
+from src.api.dependencies import get_loaded_stages, is_model_loaded, load_model
 from src.api.routes import auth, model, predict, explain
 
 # ---------------------------------------------------------------------------
@@ -59,12 +59,12 @@ async def lifespan(app: FastAPI):
     """
     logger.info("Iniciando Credit Score API...")
     load_model()
-    if is_model_loaded():
-        logger.info("Pipeline ML carregado com sucesso.")
+    stages = get_loaded_stages()
+    if stages:
+        logger.info("Modelos carregados: %s", stages)
     else:
         logger.warning(
-            "Nenhum modelo encontrado. Endpoints de predição retornarão 503 "
-            "até que o DAG 'credit_score_etl' seja executado no Airflow."
+            "Nenhum modelo encontrado. Endpoints de predição retornarão 503."
         )
     yield
     logger.info("Encerrando Credit Score API.")
@@ -141,10 +141,11 @@ def health() -> JSONResponse:
         HTTP 200 se saudável, HTTP 503 se o modelo não estiver carregado.
     """
     model_loaded = is_model_loaded()
+    stages = get_loaded_stages()
     body = {
         "status": "ok",
         "model_loaded": model_loaded,
-        "model_status": "disponível" if model_loaded else "indisponível",
+        "loaded_stages": stages,
         "docs": "/docs",
     }
     http_status = 200 if model_loaded else 503

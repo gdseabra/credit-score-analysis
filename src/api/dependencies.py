@@ -1,27 +1,29 @@
 """
 Dependências compartilhadas da API REST.
 
-Gerencia o ciclo de vida do modelo ML:
-- Carregamento lazy do pipeline treinado no startup da aplicação.
-- Dependency FastAPI para injeção do modelo nos endpoints.
+Gerencia o ciclo de vida dos modelos ML com suporte a blue-green deployment:
+- Carrega dois modelos do MLflow Registry: Production e Staging.
+- Fallback para arquivo local (.joblib) se MLflow não estiver disponível.
+- Dependency FastAPI para injeção do modelo nos endpoints via header X-Model-Stage.
 
-O modelo esperado é um sklearn Pipeline completo (pré-processamento + classificador),
-salvo pelo Airflow DAG ``credit_score_etl`` via joblib.
+O modelo esperado é um sklearn Pipeline completo (pré-processamento + classificador).
 """
 
 import logging
+import os
 from pathlib import Path
 
-from fastapi import HTTPException, status
+from fastapi import Header, HTTPException, status
 
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# Configuração de paths
+# Configuração
 # ---------------------------------------------------------------------------
 
+MLFLOW_TRACKING_URI: str = os.getenv("MLFLOW_TRACKING_URI", "")
+MLFLOW_MODEL_NAME: str = os.getenv("MLFLOW_MODEL_NAME", "credit-score-lightgbm")
 MODEL_PATH: Path = Path("models/lightgbm_pipeline.joblib")
-"""Caminho padrão do pipeline serializado. Gerado pelo DAG train_model."""
 
 # Colunas usadas pelo modelo (espelham as constantes do DAG)
 NUMERIC_COLS: list[str] = [
@@ -55,90 +57,121 @@ CATEGORICAL_COLS: list[str] = [
 ]
 
 # ---------------------------------------------------------------------------
-# Estado global da aplicação
+# Estado global — blue-green
 # ---------------------------------------------------------------------------
 
-_model = None        # Pipeline sklearn carregado no startup
-_shap_explainer = None  # SHAPExplainer inicializado após o modelo
+_models: dict[str, object] = {}       # {"production": pipeline, "staging": pipeline}
+_shap_explainers: dict[str, object] = {}  # {"production": explainer, "staging": explainer}
+
+
+def _load_mlflow_model(stage: str) -> object | None:
+    """Tenta carregar um modelo do MLflow Registry por stage."""
+    if not MLFLOW_TRACKING_URI:
+        return None
+    try:
+        import mlflow
+        mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
+        model_uri = f"models:/{MLFLOW_MODEL_NAME}/{stage.capitalize()}"
+        model = mlflow.sklearn.load_model(model_uri)
+        logger.info("Modelo carregado do MLflow: %s (%s)", MLFLOW_MODEL_NAME, stage)
+        return model
+    except Exception as exc:
+        logger.warning("MLflow %s não disponível: %s", stage, exc)
+        return None
+
+
+def _init_shap_explainer(model: object, stage: str) -> None:
+    """Inicializa SHAPExplainer para um modelo carregado."""
+    try:
+        from src.explainability.shap_explainer import SHAPExplainer
+        _shap_explainers[stage] = SHAPExplainer(model, top_n=6)
+    except Exception as exc:
+        logger.warning("SHAPExplainer não inicializado (%s): %s", stage, exc)
 
 
 def load_model() -> None:
-    """Carrega o pipeline treinado em memória no startup da aplicação.
+    """Carrega os modelos Production e Staging no startup da aplicação.
 
-    Chamado automaticamente pelo evento ``lifespan`` do FastAPI.
-    Se o arquivo não existir, a API sobe normalmente mas retorna 503
-    nos endpoints de predição.
+    Ordem de tentativa para Production:
+    1. MLflow Registry (stage=Production)
+    2. Arquivo local (.joblib)
+
+    Staging é carregado apenas do MLflow Registry.
     """
-    global _model
-    if MODEL_PATH.exists():
+    # --- Production ---
+    prod = _load_mlflow_model("production")
+    if prod is None and MODEL_PATH.exists():
         try:
             import joblib
-
-            _model = joblib.load(MODEL_PATH)
-            logger.info("Modelo carregado com sucesso: %s", MODEL_PATH)
+            prod = joblib.load(MODEL_PATH)
+            logger.info("Modelo Production carregado do fallback local: %s", MODEL_PATH)
         except Exception as exc:
-            logger.error("Falha ao carregar o modelo '%s': %s", MODEL_PATH, exc)
-            _model = None
-            return
+            logger.error("Falha ao carregar modelo local: %s", exc)
 
-        # Inicializa SHAPExplainer logo após carregar o modelo
-        global _shap_explainer
-        try:
-            from src.explainability.shap_explainer import SHAPExplainer
-            _shap_explainer = SHAPExplainer(_model, top_n=6)
-        except Exception as exc:
-            logger.warning("SHAPExplainer não pôde ser inicializado: %s", exc)
-            _shap_explainer = None
+    if prod is not None:
+        _models["production"] = prod
+        _init_shap_explainer(prod, "production")
     else:
         logger.warning(
-            "Arquivo de modelo não encontrado em '%s'. "
-            "Execute o DAG 'credit_score_etl' no Airflow para treinar o modelo.",
+            "Nenhum modelo Production disponível. "
+            "Configure MLFLOW_TRACKING_URI ou coloque o .joblib em '%s'.",
             MODEL_PATH,
         )
 
-
-def get_model():
-    """Dependency FastAPI que injeta o pipeline treinado nos endpoints.
-
-    Returns:
-        Pipeline sklearn carregado.
-
-    Raises:
-        HTTPException 503: Se o modelo não estiver disponível.
-    """
-    if _model is None:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=(
-                "Modelo não disponível. "
-                "Execute o DAG 'credit_score_etl' no Airflow (http://localhost:8080) "
-                "para treinar e persistir o modelo."
-            ),
-        )
-    return _model
+    # --- Staging ---
+    staging = _load_mlflow_model("staging")
+    if staging is not None:
+        _models["staging"] = staging
+        _init_shap_explainer(staging, "staging")
+    else:
+        logger.info("Nenhum modelo Staging disponível — shadow mode desabilitado.")
 
 
-def get_shap_explainer():
-    """Dependency FastAPI que injeta o SHAPExplainer nos endpoints.
+def get_model(x_model_stage: str = Header("production", alias="X-Model-Stage")):
+    """Dependency FastAPI — injeta o modelo baseado no header X-Model-Stage.
 
-    Returns:
-        SHAPExplainer inicializado.
+    Headers:
+        X-Model-Stage: "production" (default) ou "staging".
 
     Raises:
-        HTTPException 503: Se o explainer não estiver disponível.
+        HTTPException 503: Se o modelo do stage solicitado não estiver disponível.
     """
-    if _shap_explainer is None:
+    stage = x_model_stage.lower()
+    model = _models.get(stage)
+    if model is None:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=(
-                "SHAPExplainer não disponível. "
-                "Verifique se o modelo foi carregado corretamente e se "
-                "a biblioteca shap está instalada."
-            ),
+            detail=f"Modelo '{stage}' não disponível. Stages carregados: {list(_models.keys())}",
         )
-    return _shap_explainer
+    return model
+
+
+def get_model_by_stage(stage: str):
+    """Retorna o modelo de um stage específico ou None."""
+    return _models.get(stage)
+
+
+def get_shap_explainer(x_model_stage: str = Header("production", alias="X-Model-Stage")):
+    """Dependency FastAPI — injeta o SHAPExplainer baseado no header X-Model-Stage.
+
+    Raises:
+        HTTPException 503: Se o explainer do stage solicitado não estiver disponível.
+    """
+    stage = x_model_stage.lower()
+    explainer = _shap_explainers.get(stage)
+    if explainer is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"SHAPExplainer '{stage}' não disponível.",
+        )
+    return explainer
 
 
 def is_model_loaded() -> bool:
-    """Retorna True se o modelo estiver carregado em memória."""
-    return _model is not None
+    """Retorna True se ao menos o modelo Production estiver carregado."""
+    return "production" in _models
+
+
+def get_loaded_stages() -> list[str]:
+    """Retorna lista de stages com modelos carregados."""
+    return list(_models.keys())
