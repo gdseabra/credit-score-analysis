@@ -224,3 +224,4 @@ __marimo__/
 src/models/trainer.py
 .docker/airflow-logs/scheduler/latest
 data/interim/application_train_interim.parquet
+cv_poupex.tex

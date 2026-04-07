@@ -117,8 +117,11 @@ class TestLoadAllCoreTables:
             loader.load_all_core_tables()
 
     def test_load_all_core_tables_retorna_dict_com_chaves_corretas(self, tmp_path):
-        # Cria os três arquivos necessários
-        for nome in ["application_train.csv", "bureau.csv", "previous_application.csv"]:
+        for nome in [
+            "application_train.csv", "bureau.csv", "bureau_balance.csv",
+            "previous_application.csv", "installments_payments.csv",
+            "POS_CASH_balance.csv", "credit_card_balance.csv",
+        ]:
             pd.DataFrame({"SK_ID_CURR": [1, 2]}).to_csv(tmp_path / nome, index=False)
 
         loader = HomeCreditDataLoader(data_dir=str(tmp_path))
@@ -127,10 +130,18 @@ class TestLoadAllCoreTables:
         assert isinstance(resultado, dict)
         assert "application_train" in resultado
         assert "bureau" in resultado
+        assert "bureau_balance" in resultado
         assert "previous_application" in resultado
+        assert "installments_payments" in resultado
+        assert "pos_cash_balance" in resultado
+        assert "credit_card_balance" in resultado
 
     def test_load_all_core_tables_valores_sao_dataframes(self, tmp_path):
-        for nome in ["application_train.csv", "bureau.csv", "previous_application.csv"]:
+        for nome in [
+            "application_train.csv", "bureau.csv", "bureau_balance.csv",
+            "previous_application.csv", "installments_payments.csv",
+            "POS_CASH_balance.csv", "credit_card_balance.csv",
+        ]:
             pd.DataFrame({"SK_ID_CURR": [1, 2]}).to_csv(tmp_path / nome, index=False)
 
         loader = HomeCreditDataLoader(data_dir=str(tmp_path))
