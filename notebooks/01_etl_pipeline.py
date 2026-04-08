@@ -12,11 +12,12 @@
 
 # COMMAND ----------
 
-# Configuração — preencha com os valores do `terraform output`
-# NÃO commite esta célula com valores reais
-
 import os
 import sys
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from databricks.sdk.runtime import dbutils  # noqa: F401
 
 # Permite importar src/ a partir do Databricks Repos
 REPO_ROOT = "/Users/gdseabra@gmail.com/credit-score-analysis"
@@ -27,7 +28,7 @@ os.environ["AWS_ACCESS_KEY_ID"]     = dbutils.secrets.get("aws-credentials", "ac
 os.environ["AWS_SECRET_ACCESS_KEY"] = dbutils.secrets.get("aws-credentials", "secret-access-key")
 os.environ["AWS_DEFAULT_REGION"]    = "us-east-1"
 
-BUCKET_DATALAKE = "<DATALAKE_BUCKET>"   # terraform output -raw datalake_bucket
+BUCKET_DATALAKE = dbutils.secrets.get("aws-credentials", "datalake-bucket")
 
 # COMMAND ----------
 

@@ -14,11 +14,12 @@
 
 # COMMAND ----------
 
-# Configuração — preencha com os valores do `terraform output`
-# NÃO commite esta célula com valores reais
-
 import os
 import sys
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from databricks.sdk.runtime import dbutils  # noqa: F401
 
 REPO_ROOT = "/Users/gdseabra@gmail.com/credit-score-analysis"
 if REPO_ROOT not in sys.path:
@@ -28,8 +29,8 @@ os.environ["AWS_ACCESS_KEY_ID"]     = dbutils.secrets.get("aws-credentials", "ac
 os.environ["AWS_SECRET_ACCESS_KEY"] = dbutils.secrets.get("aws-credentials", "secret-access-key")
 os.environ["AWS_DEFAULT_REGION"]    = "us-east-1"
 
-BUCKET_DATALAKE      = "<DATALAKE_BUCKET>"          # terraform output -raw datalake_bucket
-MLFLOW_TRACKING_URI  = "http://<EC2_PUBLIC_IP>:5000" # terraform output -raw mlflow_url
+BUCKET_DATALAKE      = dbutils.secrets.get("aws-credentials", "datalake-bucket")
+MLFLOW_TRACKING_URI  = dbutils.secrets.get("aws-credentials", "mlflow-tracking-uri")
 MLFLOW_MODEL_NAME    = "credit-score-lightgbm"
 
 # COMMAND ----------
