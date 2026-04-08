@@ -1,0 +1,108 @@
+name: Databricks Fallback — Desligar após créditos
+
+# ─────────────────────────────────────────────────────────────
+# Ajuste a data do cron para exatamente 2 semanas após o início
+# do plano pago. Exemplo: plano iniciou em 07/04/2026 →
+# cron dispara em 21/04/2026 às 09:00 UTC.
+#
+# Para rodar manualmente (ex: se quiser antecipar):
+#   GitHub → Actions → "Databricks Fallback" → Run workflow
+# ─────────────────────────────────────────────────────────────
+on:
+  schedule:
+    - cron: '0 9 21 4 *'   # ← AJUSTE: DD MM (dia mês) do fim dos créditos
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Digite "sim" para confirmar o fallback'
+        required: true
+        default: ''
+
+jobs:
+  fallback:
+    name: Aplicar community.tfvars e desligar Databricks
+    runs-on: ubuntu-latest
+
+    # Proteção extra no disparo manual
+    if: >
+      github.event_name == 'schedule' ||
+      github.event.inputs.confirm == 'sim'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: '1.5.0'
+
+      - name: Terraform Init
+        working-directory: infra/
+        env:
+          AWS_ACCESS_KEY_ID:     ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION:    ${{ secrets.AWS_DEFAULT_REGION }}
+        run: terraform init
+
+      # Valida o plano antes de aplicar (log visível no GitHub)
+      - name: Terraform Plan (fallback)
+        working-directory: infra/
+        env:
+          AWS_ACCESS_KEY_ID:     ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION:    ${{ secrets.AWS_DEFAULT_REGION }}
+          TF_VAR_databricks_host:  ${{ secrets.DATABRICKS_HOST }}
+          TF_VAR_databricks_token: ${{ secrets.DATABRICKS_TOKEN }}
+          TF_VAR_my_ip:            ${{ secrets.MY_IP }}
+          TF_VAR_key_pair_name:    ${{ secrets.KEY_PAIR_NAME }}
+        run: terraform plan -var-file=community.tfvars -out=fallback.tfplan
+
+      - name: Terraform Apply (fallback)
+        working-directory: infra/
+        env:
+          AWS_ACCESS_KEY_ID:     ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION:    ${{ secrets.AWS_DEFAULT_REGION }}
+          TF_VAR_databricks_host:  ${{ secrets.DATABRICKS_HOST }}
+          TF_VAR_databricks_token: ${{ secrets.DATABRICKS_TOKEN }}
+          TF_VAR_my_ip:            ${{ secrets.MY_IP }}
+          TF_VAR_key_pair_name:    ${{ secrets.KEY_PAIR_NAME }}
+        run: terraform apply -auto-approve fallback.tfplan
+
+      - name: Verificar estado pós-fallback
+        working-directory: infra/
+        env:
+          AWS_ACCESS_KEY_ID:     ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION:    ${{ secrets.AWS_DEFAULT_REGION }}
+          TF_VAR_databricks_host:  ${{ secrets.DATABRICKS_HOST }}
+          TF_VAR_databricks_token: ${{ secrets.DATABRICKS_TOKEN }}
+          TF_VAR_my_ip:            ${{ secrets.MY_IP }}
+          TF_VAR_key_pair_name:    ${{ secrets.KEY_PAIR_NAME }}
+        run: |
+          echo "=== Estado após fallback ==="
+          terraform output databricks_tier_active
+          terraform output databricks_cluster_id
+          terraform output databricks_job_id
+          echo ""
+          echo "=== Verificando MLflow ainda online ==="
+          MLFLOW_URL=$(terraform output -raw mlflow_url)
+          curl --fail --silent "$MLFLOW_URL/api/2.0/mlflow/experiments/search" \
+            && echo "✓ MLflow online em $MLFLOW_URL" \
+            || echo "⚠ MLflow não respondeu — verifique o EC2"
+
+      - name: Resumo do fallback
+        run: |
+          echo "## Fallback Databricks Concluído" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Item | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|---|---|" >> $GITHUB_STEP_SUMMARY
+          echo "| Cluster Databricks | ✓ Destruído |" >> $GITHUB_STEP_SUMMARY
+          echo "| Jobs agendados | ✓ Destruídos |" >> $GITHUB_STEP_SUMMARY
+          echo "| EC2 MLflow | ✓ Mantido |" >> $GITHUB_STEP_SUMMARY
+          echo "| S3 Data Lake | ✓ Mantido |" >> $GITHUB_STEP_SUMMARY
+          echo "| Modelo em Production | ✓ Mantido no MLflow Registry |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "A FastAPI continua servindo predições do modelo registrado." >> $GITHUB_STEP_SUMMARY
+          echo "Re-treinamento futuro: execute os notebooks manualmente no Databricks CE." >> $GITHUB_STEP_SUMMARY
