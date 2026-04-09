@@ -29,9 +29,11 @@ os.environ["AWS_ACCESS_KEY_ID"]     = dbutils.secrets.get("aws-credentials", "ac
 os.environ["AWS_SECRET_ACCESS_KEY"] = dbutils.secrets.get("aws-credentials", "secret-access-key")
 os.environ["AWS_DEFAULT_REGION"]    = "us-east-1"
 
-BUCKET_DATALAKE      = dbutils.secrets.get("aws-credentials", "datalake-bucket")
-MLFLOW_TRACKING_URI  = dbutils.secrets.get("aws-credentials", "mlflow-tracking-uri")
-MLFLOW_MODEL_NAME    = "credit-score-lightgbm"
+BUCKET_DATALAKE   = dbutils.secrets.get("aws-credentials", "datalake-bucket")
+MLFLOW_MODEL_NAME = "credit-score-lightgbm"
+
+import mlflow
+mlflow.set_tracking_uri("databricks")
 
 # COMMAND ----------
 
@@ -117,7 +119,7 @@ pipeline = build_preprocessor_pipeline(
 
 trainer = CreditTrainer(
     modelo_nome="lightgbm",
-    mlflow_tracking_uri=MLFLOW_TRACKING_URI,
+    mlflow_tracking_uri="databricks",
 )
 
 metricas = trainer.train(X, y, pipeline, cv_folds=5)
@@ -164,7 +166,7 @@ with mlflow.start_run(run_name="lightgbm-databricks-final"):
 
 # Promove a nova versão para Production
 
-client = mlflow.tracking.MlflowClient(tracking_uri=MLFLOW_TRACKING_URI)
+client = mlflow.tracking.MlflowClient()
 latest = client.get_latest_versions(MLFLOW_MODEL_NAME, stages=["None"])[0]
 
 print(f"Versão {latest.version} — promovendo para Production...")
@@ -174,4 +176,4 @@ client.transition_model_version_stage(
     stage="Production",
 )
 print(f"Modelo v{latest.version} em Production.")
-print(f"MLflow UI: {MLFLOW_TRACKING_URI}/#/models/{MLFLOW_MODEL_NAME}")
+print(f"Modelo registrado: {MLFLOW_MODEL_NAME}")

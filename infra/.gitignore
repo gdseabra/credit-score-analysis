@@ -1,0 +1,9 @@
+# Terraform state (contem credenciais e estado sensivel)
+*.tfstate
+*.tfstate.backup
+.terraform/
+.terraform.lock.hcl
+
+# Variaveis locais (podem conter seu IP, credenciais)
+*.tfvars
+!terraform.tfvars.example

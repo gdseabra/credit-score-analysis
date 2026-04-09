@@ -21,7 +21,8 @@ logger = logging.getLogger(__name__)
 # Configuração
 # ---------------------------------------------------------------------------
 
-MLFLOW_TRACKING_URI: str = os.getenv("MLFLOW_TRACKING_URI", "")
+DATABRICKS_HOST: str = os.getenv("DATABRICKS_HOST", "")
+DATABRICKS_TOKEN: str = os.getenv("DATABRICKS_TOKEN", "")
 MLFLOW_MODEL_NAME: str = os.getenv("MLFLOW_MODEL_NAME", "credit-score-lightgbm")
 MODEL_PATH: Path = Path("models/lightgbm_pipeline.joblib")
 
@@ -65,12 +66,14 @@ _shap_explainers: dict[str, object] = {}  # {"production": explainer, "staging":
 
 
 def _load_mlflow_model(stage: str) -> object | None:
-    """Tenta carregar um modelo do MLflow Registry por stage."""
-    if not MLFLOW_TRACKING_URI:
+    """Tenta carregar um modelo do MLflow Registry (Databricks) por stage."""
+    if not DATABRICKS_HOST or not DATABRICKS_TOKEN:
         return None
     try:
         import mlflow
-        mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
+        os.environ["DATABRICKS_HOST"] = DATABRICKS_HOST
+        os.environ["DATABRICKS_TOKEN"] = DATABRICKS_TOKEN
+        mlflow.set_tracking_uri("databricks")
         model_uri = f"models:/{MLFLOW_MODEL_NAME}/{stage.capitalize()}"
         model = mlflow.sklearn.load_model(model_uri)
         logger.info("Modelo carregado do MLflow: %s (%s)", MLFLOW_MODEL_NAME, stage)
@@ -114,7 +117,7 @@ def load_model() -> None:
     else:
         logger.warning(
             "Nenhum modelo Production disponível. "
-            "Configure MLFLOW_TRACKING_URI ou coloque o .joblib em '%s'.",
+            "Configure DATABRICKS_HOST + DATABRICKS_TOKEN ou coloque o .joblib em '%s'.",
             MODEL_PATH,
         )
 
