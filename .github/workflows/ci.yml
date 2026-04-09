@@ -88,7 +88,7 @@ jobs:
     steps:
       - name: Sync repo
         run: |
-          curl -sf -X PATCH \
+          curl --fail-with-body -X PATCH \
             -H "Authorization: Bearer ${{ secrets.DATABRICKS_TOKEN }}" \
             -H "Content-Type: application/json" \
             "${{ secrets.DATABRICKS_HOST }}/api/2.0/repos/${{ secrets.DATABRICKS_REPO_ID }}" \
