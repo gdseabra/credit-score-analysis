@@ -133,14 +133,14 @@ class S3DataLoader:
         >>> tables = loader.load_all_core_tables()
     """
 
-    def __init__(self, bucket: str, prefix: str = "bronze/") -> None:
+    def __init__(self, bucket: str, prefix: str = "bronze/", region: str = "us-east-1") -> None:
         import boto3
         import io
 
         self.bucket = bucket
         self.prefix = prefix.rstrip("/") + "/"
         self.logger = logging.getLogger(self.__class__.__name__)
-        self._s3 = boto3.client("s3")
+        self._s3 = boto3.client("s3", region_name=region)
         self._io = io
 
     def _load_csv(self, filename: str) -> pd.DataFrame:

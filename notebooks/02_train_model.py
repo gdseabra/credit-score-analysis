@@ -30,7 +30,7 @@ os.environ["AWS_SECRET_ACCESS_KEY"] = dbutils.secrets.get("aws-credentials", "se
 os.environ["AWS_DEFAULT_REGION"]    = "us-east-1"
 
 BUCKET_DATALAKE   = dbutils.secrets.get("aws-credentials", "datalake-bucket")
-MLFLOW_MODEL_NAME = "credit-score-lightgbm"
+MLFLOW_MODEL_NAME = "credit_score.default.credit_score_lightgbm"
 
 import mlflow
 mlflow.set_tracking_uri("databricks")
@@ -49,7 +49,7 @@ from src.models.trainer import CreditTrainer
 
 # Carrega dataset Gold do S3
 
-s3 = boto3.client("s3")
+s3 = boto3.client("s3", region_name="us-east-1")
 obj = s3.get_object(Bucket=BUCKET_DATALAKE, Key="gold/application_train.parquet")
 df = pd.read_parquet(io.BytesIO(obj["Body"].read()))
 
@@ -135,6 +135,7 @@ print(f"  F1      : {metricas['f1_mean']:.4f}")
 # Treina modelo final no dataset completo e registra no MLflow Model Registry
 
 from sklearn.base import clone
+from mlflow.models import infer_signature
 from src.models.classifiers import CreditClassifier
 
 pipeline_final = clone(pipeline)
@@ -153,10 +154,12 @@ with mlflow.start_run(run_name="lightgbm-databricks-final"):
         if isinstance(valor, float):
             mlflow.log_metric(nome, valor)
 
+    signature = infer_signature(X, pipeline_final.predict(X))
     mlflow.sklearn.log_model(
         pipeline_final,
         artifact_path="pipeline",
         registered_model_name=MLFLOW_MODEL_NAME,
+        signature=signature,
     )
     run_id = mlflow.active_run().info.run_id
     print(f"Run ID: {run_id}")
@@ -164,16 +167,13 @@ with mlflow.start_run(run_name="lightgbm-databricks-final"):
 
 # COMMAND ----------
 
-# Promove a nova versão para Production
+# Promove a nova versão para Production via alias (Unity Catalog)
 
 client = mlflow.tracking.MlflowClient()
-latest = client.get_latest_versions(MLFLOW_MODEL_NAME, stages=["None"])[0]
+versions = client.search_model_versions(f"name='{MLFLOW_MODEL_NAME}'")
+latest = max(versions, key=lambda v: int(v.version))
 
-print(f"Versão {latest.version} — promovendo para Production...")
-client.transition_model_version_stage(
-    name=MLFLOW_MODEL_NAME,
-    version=latest.version,
-    stage="Production",
-)
-print(f"Modelo v{latest.version} em Production.")
+print(f"Versão {latest.version} — definindo alias 'production'...")
+client.set_registered_model_alias(MLFLOW_MODEL_NAME, "production", latest.version)
+print(f"Modelo v{latest.version} com alias @production.")
 print(f"Modelo registrado: {MLFLOW_MODEL_NAME}")
