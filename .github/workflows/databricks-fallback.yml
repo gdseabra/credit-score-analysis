@@ -54,8 +54,6 @@ jobs:
           AWS_DEFAULT_REGION:    ${{ secrets.AWS_DEFAULT_REGION }}
           TF_VAR_databricks_host:  ${{ secrets.DATABRICKS_HOST }}
           TF_VAR_databricks_token: ${{ secrets.DATABRICKS_TOKEN }}
-          TF_VAR_my_ip:            ${{ secrets.MY_IP }}
-          TF_VAR_key_pair_name:    ${{ secrets.KEY_PAIR_NAME }}
         run: terraform plan -var-file=community.tfvars -out=fallback.tfplan
 
       - name: Terraform Apply (fallback)
@@ -66,8 +64,6 @@ jobs:
           AWS_DEFAULT_REGION:    ${{ secrets.AWS_DEFAULT_REGION }}
           TF_VAR_databricks_host:  ${{ secrets.DATABRICKS_HOST }}
           TF_VAR_databricks_token: ${{ secrets.DATABRICKS_TOKEN }}
-          TF_VAR_my_ip:            ${{ secrets.MY_IP }}
-          TF_VAR_key_pair_name:    ${{ secrets.KEY_PAIR_NAME }}
         run: terraform apply -auto-approve fallback.tfplan
 
       - name: Verificar estado pós-fallback
@@ -78,19 +74,9 @@ jobs:
           AWS_DEFAULT_REGION:    ${{ secrets.AWS_DEFAULT_REGION }}
           TF_VAR_databricks_host:  ${{ secrets.DATABRICKS_HOST }}
           TF_VAR_databricks_token: ${{ secrets.DATABRICKS_TOKEN }}
-          TF_VAR_my_ip:            ${{ secrets.MY_IP }}
-          TF_VAR_key_pair_name:    ${{ secrets.KEY_PAIR_NAME }}
         run: |
           echo "=== Estado após fallback ==="
-          terraform output databricks_tier_active
-          terraform output databricks_cluster_id
           terraform output databricks_job_id
-          echo ""
-          echo "=== Verificando MLflow ainda online ==="
-          MLFLOW_URL=$(terraform output -raw mlflow_url)
-          curl --fail --silent "$MLFLOW_URL/api/2.0/mlflow/experiments/search" \
-            && echo "✓ MLflow online em $MLFLOW_URL" \
-            || echo "⚠ MLflow não respondeu — verifique o EC2"
 
       - name: Resumo do fallback
         run: |
@@ -98,11 +84,9 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "| Item | Status |" >> $GITHUB_STEP_SUMMARY
           echo "|---|---|" >> $GITHUB_STEP_SUMMARY
-          echo "| Cluster Databricks | ✓ Destruído |" >> $GITHUB_STEP_SUMMARY
-          echo "| Jobs agendados | ✓ Destruídos |" >> $GITHUB_STEP_SUMMARY
-          echo "| EC2 MLflow | ✓ Mantido |" >> $GITHUB_STEP_SUMMARY
+          echo "| Job serverless Databricks | ✓ Destruído |" >> $GITHUB_STEP_SUMMARY
           echo "| S3 Data Lake | ✓ Mantido |" >> $GITHUB_STEP_SUMMARY
-          echo "| Modelo em Production | ✓ Mantido no MLflow Registry |" >> $GITHUB_STEP_SUMMARY
+          echo "| Modelo em Production | ✓ Mantido no MLflow Registry (Databricks) |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "A FastAPI continua servindo predições do modelo registrado." >> $GITHUB_STEP_SUMMARY
+          echo "A FastAPI continua servindo predições via DATABRICKS_HOST + DATABRICKS_TOKEN." >> $GITHUB_STEP_SUMMARY
           echo "Re-treinamento futuro: execute os notebooks manualmente no Databricks CE." >> $GITHUB_STEP_SUMMARY
