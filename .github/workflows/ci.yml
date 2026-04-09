@@ -88,6 +88,13 @@ jobs:
     steps:
       - name: Sync repo
         run: |
+          # Descarta alterações locais no Databricks antes de sincronizar
+          curl --fail-with-body -X POST \
+            -H "Authorization: Bearer ${{ secrets.DATABRICKS_TOKEN }}" \
+            -H "Content-Type: application/json" \
+            "${{ secrets.DATABRICKS_HOST }}/api/2.0/repos/${{ secrets.DATABRICKS_REPO_ID }}/discard-changes" \
+            -d '{}'
+
           curl --fail-with-body -X PATCH \
             -H "Authorization: Bearer ${{ secrets.DATABRICKS_TOKEN }}" \
             -H "Content-Type: application/json" \
