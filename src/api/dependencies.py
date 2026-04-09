@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 
 DATABRICKS_HOST: str = os.getenv("DATABRICKS_HOST", "")
 DATABRICKS_TOKEN: str = os.getenv("DATABRICKS_TOKEN", "")
-MLFLOW_MODEL_NAME: str = os.getenv("MLFLOW_MODEL_NAME", "credit-score-lightgbm")
+MLFLOW_MODEL_NAME: str = os.getenv("MLFLOW_MODEL_NAME", "credit_score.default.credit_score_lightgbm")
 MODEL_PATH: Path = Path("models/lightgbm_pipeline.joblib")
 
 # Colunas usadas pelo modelo (espelham as constantes do DAG)
@@ -74,7 +74,7 @@ def _load_mlflow_model(stage: str) -> object | None:
         os.environ["DATABRICKS_HOST"] = DATABRICKS_HOST
         os.environ["DATABRICKS_TOKEN"] = DATABRICKS_TOKEN
         mlflow.set_tracking_uri("databricks")
-        model_uri = f"models:/{MLFLOW_MODEL_NAME}/{stage.capitalize()}"
+        model_uri = f"models:/{MLFLOW_MODEL_NAME}@{stage}"
         model = mlflow.sklearn.load_model(model_uri)
         logger.info("Modelo carregado do MLflow: %s (%s)", MLFLOW_MODEL_NAME, stage)
         return model
