@@ -20,8 +20,8 @@ from src.models.evaluator import CreditEvaluator
 # Constantes de domínio
 # ---------------------------------------------------------------------------
 
-EXPERIMENTO_MLFLOW: str = "credit-score"
-"""Nome do experimento no MLflow."""
+EXPERIMENTO_MLFLOW: str = "/Users/gdseabra@gmail.com/credit-score"
+"""Nome do experimento no MLflow (path absoluto — exigido pelo Databricks)."""
 
 N_ITER_RANDOM_SEARCH: int = 20
 """Número de iterações para o RandomizedSearchCV."""

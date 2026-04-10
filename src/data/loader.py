@@ -1,6 +1,6 @@
 import logging
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict
 import pandas as pd
 
 # Configuração básica de logging (idealmente ficaria no src/utils/logger.py)
