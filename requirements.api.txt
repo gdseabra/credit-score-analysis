@@ -11,6 +11,10 @@ python-jose[cryptography]==3.3.0
 passlib[bcrypt]==1.7.4
 bcrypt==4.0.1
 
+# MLflow / Databricks
+mlflow==2.14.3
+databricks-sdk>=0.20.0
+
 # ML / Pipeline
 scikit-learn==1.5.1
 lightgbm==4.3.0
