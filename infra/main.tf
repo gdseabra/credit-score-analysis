@@ -85,43 +85,9 @@ resource "aws_s3_object" "gold" {
 }
 
 # ============================================================
-# IAM — User para Databricks/API acessarem o S3
+# Acesso ao S3
 # ============================================================
-
-resource "aws_iam_user" "s3_access" {
-  name = "${var.project_name}-s3-access"
-
-  tags = {
-    Project = var.project_name
-  }
-}
-
-resource "aws_iam_user_policy" "s3_access" {
-  name = "S3CreditScoreAccess"
-  user = aws_iam_user.s3_access.name
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Effect = "Allow"
-        Action = [
-          "s3:GetObject",
-          "s3:PutObject",
-          "s3:DeleteObject",
-          "s3:ListBucket",
-        ]
-        Resource = [
-          aws_s3_bucket.datalake.arn,
-          "${aws_s3_bucket.datalake.arn}/*",
-          aws_s3_bucket.mlflow_artifacts.arn,
-          "${aws_s3_bucket.mlflow_artifacts.arn}/*",
-        ]
-      }
-    ]
-  })
-}
-
-resource "aws_iam_access_key" "s3_access" {
-  user = aws_iam_user.s3_access.name
-}
+# Design AWS-native: cada compute (Lambda de serving, futuro Fargate/Lambda do
+# pipeline) recebe uma IAM Role com permissões mínimas — sem usuário IAM de
+# chaves estáticas. A role da Lambda de serving está em serving.tf.
+# O acesso local (CLI/Terraform) usa o profile de bootstrap do desenvolvedor.

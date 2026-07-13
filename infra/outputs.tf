@@ -14,19 +14,6 @@ output "mlflow_bucket" {
   value       = aws_s3_bucket.mlflow_artifacts.id
 }
 
-# --- IAM (credenciais para Databricks/API) ---
-
-output "aws_access_key_id" {
-  description = "Access Key ID do IAM User (para Databricks e Railway)"
-  value       = aws_iam_access_key.s3_access.id
-}
-
-output "aws_secret_access_key" {
-  description = "Secret Access Key do IAM User"
-  value       = aws_iam_access_key.s3_access.secret
-  sensitive   = true
-}
-
 # --- Databricks ---
 
 output "databricks_job_id" {

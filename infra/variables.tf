@@ -28,9 +28,9 @@ variable "databricks_token" {
 }
 
 variable "databricks_enabled" {
-  description = "Se false, destrói todos os recursos Databricks (clusters + jobs). Use no fallback para community."
+  description = "Se false, não cria recursos Databricks (jobs/clusters). Desligado na migração AWS-native — o retreino passa para Step Functions + Fargate na Fase 3."
   type        = bool
-  default     = true
+  default     = false
 }
 
 variable "databricks_notebook_etl_path" {
