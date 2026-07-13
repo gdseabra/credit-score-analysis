@@ -1,20 +1,15 @@
 # Copie este arquivo para terraform.tfvars e preencha com seus valores:
 #   cp terraform.tfvars.example terraform.tfvars
 
-# ---- Databricks (serverless) ----
+# ---- Serving (Fase 1) ----
 
-# URL do workspace (Databricks UI → top-left menu → Settings)
-databricks_host = "https://adb-XXXXXXXXXXX.X.azuredatabricks.net"
+# Chave da API Anthropic (Claude) usada nas narrativas de explicação.
+anthropic_api_key = "sk-ant-..."
 
-# Token de acesso (Databricks UI → User Settings → Developer → Access Tokens)
-databricks_token = "dapi..."
+# ---- Databricks (legado) ----
+# Migração AWS-native: o retreino vai para Step Functions + Fargate na Fase 3.
+# Mantenha false — os recursos Databricks serão removidos por completo na Fase 3.
+databricks_enabled = false
 
-# true = cria job serverless agendado; false = destrói (use no fallback)
-databricks_enabled = true
-
-# Caminhos dos notebooks no workspace
-databricks_notebook_etl_path   = "/Users/seu@email.com/credit-score-analysis/notebooks/01_etl_pipeline"
-databricks_notebook_train_path = "/Users/seu@email.com/credit-score-analysis/notebooks/02_train_model"
-
-# E-mail para alertas de falha nos jobs (deixe "" para desativar)
+# E-mail para alertas (deixe "" para desativar)
 alert_email = "seu@email.com"

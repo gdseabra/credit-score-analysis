@@ -213,3 +213,6 @@ class ModelInfoResponse(BaseModel):
     features_categorical: list[str]
     status: str
     loaded: bool
+    run_id: Optional[str] = Field(
+        None, description="run_id do modelo promovido vindo do registro S3 (se aplicável)"
+    )

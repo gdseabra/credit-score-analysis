@@ -1,0 +1,40 @@
+# ============================================================
+# Dockerfile.lambda — Credit Score API como imagem de container Lambda
+# ============================================================
+# Base oficial da AWS para Lambda Python 3.11. O handler é servido via Mangum,
+# que adapta o app FastAPI (ASGI) para o runtime do Lambda.
+#
+# O modelo NÃO é embutido: é carregado em runtime do registro S3
+# (models/current/pointer.json). O .joblib local é copiado apenas como
+# fallback de última instância.
+#
+# Build:
+#   docker build -f Dockerfile.lambda -t credit-score-serving .
+#
+# Teste local (Runtime Interface Emulator, já incluso na imagem base):
+#   docker run --rm -p 9000:8080 \
+#     -e DATALAKE_BUCKET=<bucket> -e AWS_ACCESS_KEY_ID=... -e AWS_SECRET_ACCESS_KEY=... \
+#     credit-score-serving
+# ============================================================
+
+FROM public.ecr.aws/lambda/python:3.11
+
+# LightGBM requer libgomp (OpenMP) em runtime
+RUN yum install -y libgomp && yum clean all && rm -rf /var/cache/yum
+
+# Dependências (layer separado para cache). mangum e boto3 para o runtime Lambda.
+# --only-binary=:all: proíbe builds a partir de source: a imagem base não tem
+# compilador, então o resolver do pip é forçado a escolher, para cada pacote
+# (direto ou transitivo), a versão que publica wheel manylinux aarch64/py3.11.
+COPY requirements.api.txt ./
+RUN pip install --no-cache-dir --upgrade pip \
+ && pip install --no-cache-dir --only-binary=:all: -r requirements.api.txt mangum
+
+# Código-fonte (LAMBDA_TASK_ROOT já está no sys.path → `import src...` funciona)
+COPY src/ ${LAMBDA_TASK_ROOT}/src/
+
+# Modelo local como fallback (o caminho primário é o registro S3)
+COPY models/ ${LAMBDA_TASK_ROOT}/models/
+
+# handler = objeto Mangum em src/serving/lambda_handler.py
+CMD ["src.serving.lambda_handler.handler"]

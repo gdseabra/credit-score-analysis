@@ -26,6 +26,10 @@ DATABRICKS_TOKEN: str = os.getenv("DATABRICKS_TOKEN", "")
 MLFLOW_MODEL_NAME: str = os.getenv("MLFLOW_MODEL_NAME", "credit_score.default.credit_score_lightgbm")
 MODEL_PATH: Path = Path("models/lightgbm_pipeline.joblib")
 
+# Registro de modelos S3 (fonte de maior prioridade para Production)
+DATALAKE_BUCKET: str = os.getenv("DATALAKE_BUCKET", "")
+MODEL_POINTER_KEY: str = os.getenv("MODEL_POINTER_KEY", "models/current/pointer.json")
+
 # Colunas usadas pelo modelo (espelham as constantes do DAG)
 NUMERIC_COLS: list[str] = [
     "AMT_CREDIT",
@@ -63,6 +67,7 @@ CATEGORICAL_COLS: list[str] = [
 
 _models: dict[str, object] = {}       # {"production": pipeline, "staging": pipeline}
 _shap_explainers: dict[str, object] = {}  # {"production": explainer, "staging": explainer}
+_current_run_id: str | None = None    # run_id do modelo Production vindo do registro S3
 
 
 def _load_mlflow_model(stage: str) -> object | None:
@@ -83,8 +88,41 @@ def _load_mlflow_model(stage: str) -> object | None:
         return None
 
 
+def _load_s3_model() -> object | None:
+    """Tenta carregar o modelo Production do registro S3 (ponteiro → candidato).
+
+    Lê ``models/current/pointer.json``, baixa o ``model.joblib`` do run_id apontado
+    (com cache local) e registra o run_id ativo. Retorna ``None`` se o bucket não
+    estiver configurado ou o registro não estiver acessível.
+    """
+    global _current_run_id
+    if not DATALAKE_BUCKET:
+        return None
+    try:
+        import joblib
+
+        from src.registry import s3_registry
+
+        pointer = s3_registry.read_pointer(DATALAKE_BUCKET, MODEL_POINTER_KEY)
+        run_id = pointer["run_id"]
+        model_path = s3_registry.download_model(DATALAKE_BUCKET, run_id)
+        model = joblib.load(model_path)
+        _current_run_id = run_id
+        logger.info("Modelo Production carregado do registro S3: run_id=%s", run_id)
+        return model
+    except Exception as exc:
+        logger.warning("Registro S3 não disponível: %s", exc)
+        return None
+
+
 def _init_shap_explainer(model: object, stage: str) -> None:
-    """Inicializa SHAPExplainer para um modelo carregado."""
+    """Inicializa SHAPExplainer para um modelo carregado.
+
+    Construído sob demanda (na primeira chamada de ``/explain``) e não no cold
+    start: importar ``shap`` dispara a compilação JIT do numba e a construção do
+    TreeExplainer, o que estoura o orçamento de init do Lambda. O caminho de
+    ``/predict`` não precisa de SHAP.
+    """
     try:
         from src.explainability.shap_explainer import SHAPExplainer
         _shap_explainers[stage] = SHAPExplainer(model, top_n=6)
@@ -96,13 +134,16 @@ def load_model() -> None:
     """Carrega os modelos Production e Staging no startup da aplicação.
 
     Ordem de tentativa para Production:
-    1. MLflow Registry (stage=Production)
-    2. Arquivo local (.joblib)
+    1. Registro S3 (ponteiro → candidato)
+    2. MLflow Registry (stage=Production)
+    3. Arquivo local (.joblib)
 
     Staging é carregado apenas do MLflow Registry.
     """
     # --- Production ---
-    prod = _load_mlflow_model("production")
+    prod = _load_s3_model()
+    if prod is None:
+        prod = _load_mlflow_model("production")
     if prod is None and MODEL_PATH.exists():
         try:
             import joblib
@@ -113,7 +154,6 @@ def load_model() -> None:
 
     if prod is not None:
         _models["production"] = prod
-        _init_shap_explainer(prod, "production")
     else:
         logger.warning(
             "Nenhum modelo Production disponível. "
@@ -125,7 +165,6 @@ def load_model() -> None:
     staging = _load_mlflow_model("staging")
     if staging is not None:
         _models["staging"] = staging
-        _init_shap_explainer(staging, "staging")
     else:
         logger.info("Nenhum modelo Staging disponível — shadow mode desabilitado.")
 
@@ -162,6 +201,9 @@ def get_shap_explainer(x_model_stage: str = Header("production", alias="X-Model-
     """
     stage = x_model_stage.lower()
     explainer = _shap_explainers.get(stage)
+    if explainer is None and stage in _models:
+        _init_shap_explainer(_models[stage], stage)
+        explainer = _shap_explainers.get(stage)
     if explainer is None:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -173,6 +215,11 @@ def get_shap_explainer(x_model_stage: str = Header("production", alias="X-Model-
 def is_model_loaded() -> bool:
     """Retorna True se ao menos o modelo Production estiver carregado."""
     return "production" in _models
+
+
+def get_current_run_id() -> str | None:
+    """Retorna o run_id do modelo Production vindo do registro S3 (ou None)."""
+    return _current_run_id
 
 
 def get_loaded_stages() -> list[str]:

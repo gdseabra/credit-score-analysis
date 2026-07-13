@@ -8,7 +8,13 @@ Exige token JWT válido.
 from fastapi import APIRouter, Depends
 
 from src.api.auth import get_current_user
-from src.api.dependencies import CATEGORICAL_COLS, MODEL_PATH, NUMERIC_COLS, is_model_loaded
+from src.api.dependencies import (
+    CATEGORICAL_COLS,
+    MODEL_PATH,
+    NUMERIC_COLS,
+    get_current_run_id,
+    is_model_loaded,
+)
 from src.api.schemas import ModelInfoResponse
 
 router = APIRouter(prefix="/model", tags=["Modelo"])
@@ -49,4 +55,5 @@ def model_info(_user: dict = Depends(get_current_user)) -> ModelInfoResponse:
         features_categorical=CATEGORICAL_COLS,
         status=model_status,
         loaded=loaded,
+        run_id=get_current_run_id(),
     )
